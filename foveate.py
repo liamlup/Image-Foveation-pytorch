@@ -71,9 +71,9 @@ def foveate_image(img, fixs):
     _, height, width = img.shape
 
     # compute coefficients
-    p = 7.5
-    k = 3
-    alpha = 2.5
+    p = torch.tensor(7.5)
+    k = torch.tensor(3)
+    alpha = torch.tensor(2.5)
 
     x = torch.arange(0, width, dtype=torch.float32)
     y = torch.arange(0, height, dtype=torch.float32)
