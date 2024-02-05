@@ -1,7 +1,10 @@
 import numpy as np
 import torch
 import torch.nn.functional as F
+from torchvision.io import read_image
 from torchvision.transforms import v2
+import matplotlib.pyplot as plt
+from scipy.datasets import face
 
 
 def genGaussiankernel(width, sigma):
@@ -14,7 +17,7 @@ def genGaussiankernel(width, sigma):
 
 def pyramid(img, sigma: float = 1, prNum=6):
     # Convert the image to a PyTorch tensor
-    im_tensor = torch.from_numpy(img.copy()).permute(2, 0, 1).float()  # Convert HWC to CHW and to float
+    im_tensor = img.clone().float()  # Convert HWC to CHW and to float
     height_ori, width_ori = im_tensor.shape[1], im_tensor.shape[2]
     G = im_tensor.clone()
     pyramids = [G]
@@ -56,7 +59,7 @@ def foveate_image(img, fixs):
     sigma = 0.248
     prNum = 6
     As = pyramid(img, sigma, prNum)
-    height, width, _ = img.shape
+    _, height, width = img.shape
 
     # compute coef
     p = torch.tensor(7.5)
@@ -86,7 +89,7 @@ def foveate_image(img, fixs):
     # layer index
     layer_ind = torch.zeros_like(R)
     for i in range(1, prNum):
-        ind = torch.logical_and(R >= omega[i], R <= omega[i - 1])
+        ind = torch.logical_and(torch.ge(R, omega[i]), torch.le(R, omega[i - 1]))
         layer_ind[ind] = i
 
     # B
@@ -119,8 +122,7 @@ def foveate_image(img, fixs):
             At = A[i]
             im_fov[i, :, :] += torch.mul(Mt, At)
 
-    im_fov = im_fov.numpy().astype(np.uint8).transpose(1, 2, 0)
-    return im_fov
+    return im_fov.to(torch.uint8)
 
 
 class FoveateImage(torch.nn.Module):
