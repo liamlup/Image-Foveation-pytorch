@@ -25,7 +25,7 @@ def genGaussiankernel(width, sigma):
     return kernel_2d
 
 
-def pyramid(img, sigma: float = 1, prNum=6):
+def pyramid(img, sigma: torch.Tensor = 1, prNum=6):
     im_tensor = img.clone().float()
     height_ori, width_ori = im_tensor.shape[1], im_tensor.shape[2]
     G = im_tensor.clone()
@@ -65,34 +65,32 @@ def foveate_image(img, fixs):
     """
     # TODO: Use visual angle instead of pixels for fixations
 
-    sigma = 0.248
+    sigma = torch.tensor(0.248)
     prNum = 6
     As = pyramid(img, sigma, prNum)
     _, height, width = img.shape
 
     # compute coefficients
     p = torch.tensor(7.5)
-    k = torch.tensor(3)
+    k = torch.tensor(3.)
     alpha = torch.tensor(2.5)
 
     x = torch.arange(0, width, dtype=torch.float32)
     y = torch.arange(0, height, dtype=torch.float32)
     x2d, y2d = torch.meshgrid(x, y, indexing='xy')
-    theta = torch.sqrt((x2d - fixs[0][0]) ** 2 + (y2d - fixs[0][1]) ** 2) / p
-    for fix in fixs[1:]:
-        theta = torch.min(theta, torch.sqrt((x2d - fix[0]) ** 2 + (y2d - fix[1]) ** 2) / p)
+
+    fixs_tensor = torch.tensor(fixs)  # Convert fixations to a tensor
+    distances = torch.sqrt((x2d.unsqueeze(-1) - fixs_tensor[:, 0]) ** 2 + (y2d.unsqueeze(-1) - fixs_tensor[:, 1]) ** 2)
+    theta = torch.min(distances, dim=-1).values / p
     R = alpha / (theta + alpha)
 
-    Ts = []
-    for i in range(1, prNum):
-        Ts.append(torch.exp(-((2 ** (i - 3)) * R / sigma) ** 2 * k))
-    Ts.append(torch.zeros_like(theta))
+    levels = torch.arange(1, prNum, dtype=torch.float32)
+    Ts = torch.exp(-((2 ** (levels.view(-1, 1, 1) - 3)) * R.unsqueeze(0) / sigma) ** 2 * k)
+    Ts = torch.cat((Ts, torch.zeros(1, R.shape[0], R.shape[1])), dim=0)
 
     # Omega
-    omega = torch.zeros(prNum)
-    for i in range(1, prNum):
-        omega[i - 1] = torch.sqrt(torch.log(torch.tensor(2)) / k) / (2 ** (i - 3)) * sigma
-
+    omega = torch.sqrt(torch.log(torch.tensor(2.0)) / k) / (2 ** (levels - 3)) * sigma
+    omega = torch.cat((omega, torch.tensor([0.])), dim=0)
     omega[omega > 1] = 1
 
     # Layer index
@@ -102,9 +100,7 @@ def foveate_image(img, fixs):
         layer_ind[ind] = i
 
     # B
-    Bs = []
-    for i in range(1, prNum):
-        Bs.append((0.5 - Ts[i]) / (Ts[i - 1] - Ts[i] + 1e-5))
+    Bs = [(0.5 - Ts[i]) / (Ts[i - 1] - Ts[i] + 1e-5) for i in range(1, prNum)]
 
     # M
     Ms = torch.zeros((prNum, R.shape[0], R.shape[1]))
@@ -121,14 +117,10 @@ def foveate_image(img, fixs):
         if torch.sum(ind) > 0:
             Ms[i][ind] = Bs[i][ind]
 
-    print('num of full-res pixel', torch.sum(torch.isclose(Ms[0], torch.tensor(1, dtype=torch.float32))))
+    print('num of full-res pixel', torch.sum(torch.isclose(Ms[0], torch.tensor(1.))))
+
     # generate periphery image
-    im_fov = torch.zeros_like(As[0], dtype=torch.float32)
-    for M, A in zip(Ms, As):
-        for i in range(3):
-            Mt = M
-            At = A[i]
-            im_fov[i, :, :] += torch.mul(Mt, At)
+    im_fov = (As * Ms.unsqueeze(1)).sum(dim=0)
 
     return im_fov.to(torch.uint8)
 
